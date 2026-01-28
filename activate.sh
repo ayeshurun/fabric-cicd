@@ -21,5 +21,5 @@ command -v code &> /dev/null && code --install-extension ms-python.python --forc
 [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$PATH:$HOME/.local/bin"
 [[ ":$PATH:" != *":$HOME/.cargo/bin:"* ]] && export PATH="$PATH:$HOME/.cargo/bin"
 
-uv sync --python 3.11
+uv sync --python 3.12
 [ -f .venv/bin/activate ] && source .venv/bin/activate

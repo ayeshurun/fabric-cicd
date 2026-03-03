@@ -682,6 +682,37 @@ class TestDeployWithConfig:
         assert result.errors == ["publish failed"]
         mock_unpublish.assert_not_called()
 
+    @patch("fabric_cicd.publish.FabricWorkspace")
+    @patch("fabric_cicd.publish.publish_all_items")
+    @patch("fabric_cicd.publish.unpublish_all_orphan_items")
+    @patch("fabric_cicd.constants.FEATURE_FLAG", set(["enable_experimental_features", "enable_config_deploy"]))
+    def test_deploy_with_config_returns_failed_status_on_unpublish_error(
+        self, mock_unpublish, mock_publish, mock_workspace, tmp_path
+    ):
+        """Test deployment returns failed status when unpublish operation errors."""
+        test_repo_dir = tmp_path / "test" / "path"
+        test_repo_dir.mkdir(parents=True)
+
+        config_data = {
+            "core": {
+                "workspace_id": {"dev": "12345678-1234-1234-1234-123456789abc"},
+                "repository_directory": "test/path",
+            }
+        }
+        config_file = tmp_path / "config.yml"
+        with Path.open(config_file, "w") as f:
+            yaml.dump(config_data, f)
+
+        mock_workspace.return_value = MagicMock()
+        mock_unpublish.side_effect = RuntimeError("unpublish failed")
+
+        result = deploy_with_config(str(config_file), "dev")
+
+        assert result.status == DeploymentStatus.FAILED
+        assert result.message == "unpublish failed"
+        assert result.errors == ["unpublish failed"]
+        mock_publish.assert_called_once()
+
 
 class TestConfigIntegration:
     """Integration tests for config functionality."""

@@ -19,6 +19,7 @@ from fabric_cicd._common._config_utils import (
 )
 from fabric_cicd._common._config_validator import ConfigValidationError
 from fabric_cicd._common._exceptions import InputError
+from fabric_cicd.constants import DeploymentStatus
 
 
 class TestConfigFileLoading:
@@ -441,7 +442,7 @@ class TestDeployWithConfig:
         mock_workspace.return_value = mock_workspace_instance
 
         # Execute deployment
-        deploy_with_config(str(config_file), "dev")
+        result = deploy_with_config(str(config_file), "dev")
 
         # Verify workspace creation
         # Note: repository_directory will be resolved to absolute path during validation
@@ -467,6 +468,7 @@ class TestDeployWithConfig:
             item_name_exclude_regex="^DEBUG.*",
             items_to_include=None,
         )
+        assert result.status == DeploymentStatus.COMPLETED
 
     @patch("fabric_cicd.publish.FabricWorkspace")
     @patch("fabric_cicd.publish.publish_all_items")
@@ -648,6 +650,37 @@ class TestDeployWithConfig:
         )
         # Verify unpublish was also called (but without shortcut_exclude_regex since it's publish-only)
         mock_unpublish.assert_called_once()
+
+    @patch("fabric_cicd.publish.FabricWorkspace")
+    @patch("fabric_cicd.publish.publish_all_items")
+    @patch("fabric_cicd.publish.unpublish_all_orphan_items")
+    @patch("fabric_cicd.constants.FEATURE_FLAG", set(["enable_experimental_features", "enable_config_deploy"]))
+    def test_deploy_with_config_returns_failed_status_on_publish_error(
+        self, mock_unpublish, mock_publish, mock_workspace, tmp_path
+    ):
+        """Test deployment returns failed status when publish operation errors."""
+        test_repo_dir = tmp_path / "test" / "path"
+        test_repo_dir.mkdir(parents=True)
+
+        config_data = {
+            "core": {
+                "workspace_id": {"dev": "12345678-1234-1234-1234-123456789abc"},
+                "repository_directory": "test/path",
+            }
+        }
+        config_file = tmp_path / "config.yml"
+        with Path.open(config_file, "w") as f:
+            yaml.dump(config_data, f)
+
+        mock_workspace.return_value = MagicMock()
+        mock_publish.side_effect = RuntimeError("publish failed")
+
+        result = deploy_with_config(str(config_file), "dev")
+
+        assert result.status == DeploymentStatus.FAILED
+        assert result.message == "publish failed"
+        assert result.errors == ["publish failed"]
+        mock_unpublish.assert_not_called()
 
 
 class TestConfigIntegration:

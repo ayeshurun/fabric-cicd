@@ -4,6 +4,7 @@
 """Constants for the fabric-cicd package."""
 
 import os
+from dataclasses import dataclass, field
 from enum import Enum
 
 # General
@@ -140,6 +141,22 @@ class OperationType(str, Enum):
     """Publishing items to the workspace."""
     UNPUBLISH = "unpublish"
     """Unpublishing/removing items from the workspace."""
+
+
+class DeploymentStatus(str, Enum):
+    """Deployment status values returned by config-based deployment."""
+
+    COMPLETED = "completed successfully"
+    FAILED = "failed"
+
+
+@dataclass
+class DeploymentResult:
+    """Result object returned by config-based deployment."""
+
+    status: DeploymentStatus
+    message: str = ""
+    errors: list[str] = field(default_factory=list)
 
 
 # The following resources can be unpublished only if their feature flags are set

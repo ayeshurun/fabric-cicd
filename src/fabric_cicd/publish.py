@@ -298,7 +298,7 @@ def deploy_with_config(
     environment: str = "N/A",
     token_credential: Optional[TokenCredential] = None,
     config_override: Optional[dict] = None,
-) -> None:
+) -> constants.DeploymentResult:
     """
     Deploy items using YAML configuration file with environment-specific settings.
     This function provides a simplified deployment interface that loads configuration
@@ -378,35 +378,48 @@ def deploy_with_config(
     # Apply feature flags and constants if specified
     apply_config_overrides(config, environment)
 
-    # Create FabricWorkspace object with extracted settings
-    workspace = FabricWorkspace(
-        repository_directory=workspace_settings["repository_directory"],
-        item_type_in_scope=workspace_settings.get("item_types_in_scope"),
-        environment=environment,
-        workspace_id=workspace_settings.get("workspace_id"),
-        workspace_name=workspace_settings.get("workspace_name"),
-        token_credential=token_credential,
-        parameter_file_path=workspace_settings.get("parameter_file_path"),
+    try:
+        # Create FabricWorkspace object with extracted settings
+        workspace = FabricWorkspace(
+            repository_directory=workspace_settings["repository_directory"],
+            item_type_in_scope=workspace_settings.get("item_types_in_scope"),
+            environment=environment,
+            workspace_id=workspace_settings.get("workspace_id"),
+            workspace_name=workspace_settings.get("workspace_name"),
+            token_credential=token_credential,
+            parameter_file_path=workspace_settings.get("parameter_file_path"),
+        )
+        # Execute deployment operations based on skip settings
+        if not publish_settings.get("skip", False):
+            publish_all_items(
+                workspace,
+                item_name_exclude_regex=publish_settings.get("exclude_regex"),
+                folder_path_exclude_regex=publish_settings.get("folder_exclude_regex"),
+                items_to_include=publish_settings.get("items_to_include"),
+                shortcut_exclude_regex=publish_settings.get("shortcut_exclude_regex"),
+            )
+        else:
+            logger.info(f"Skipping publish operation for environment '{environment}'")
+
+        if not unpublish_settings.get("skip", False):
+            unpublish_all_orphan_items(
+                workspace,
+                item_name_exclude_regex=unpublish_settings.get("exclude_regex", "^$"),
+                items_to_include=unpublish_settings.get("items_to_include"),
+            )
+        else:
+            logger.info(f"Skipping unpublish operation for environment '{environment}'")
+    except Exception as e:
+        logger.error(f"Config-based deployment failed: {e}")
+        return constants.DeploymentResult(
+            status=constants.DeploymentStatus.FAILED,
+            message=str(e),
+            errors=[str(e)],
+        )
+
+    msg = "Config-based deployment completed successfully"
+    logger.info(msg)
+    return constants.DeploymentResult(
+        status=constants.DeploymentStatus.COMPLETED,
+        message=msg,
     )
-    # Execute deployment operations based on skip settings
-    if not publish_settings.get("skip", False):
-        publish_all_items(
-            workspace,
-            item_name_exclude_regex=publish_settings.get("exclude_regex"),
-            folder_path_exclude_regex=publish_settings.get("folder_exclude_regex"),
-            items_to_include=publish_settings.get("items_to_include"),
-            shortcut_exclude_regex=publish_settings.get("shortcut_exclude_regex"),
-        )
-    else:
-        logger.info(f"Skipping publish operation for environment '{environment}'")
-
-    if not unpublish_settings.get("skip", False):
-        unpublish_all_orphan_items(
-            workspace,
-            item_name_exclude_regex=unpublish_settings.get("exclude_regex", "^$"),
-            items_to_include=unpublish_settings.get("items_to_include"),
-        )
-    else:
-        logger.info(f"Skipping unpublish operation for environment '{environment}'")
-
-    logger.info("Config-based deployment completed successfully")

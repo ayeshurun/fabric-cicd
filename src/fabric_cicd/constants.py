@@ -65,6 +65,7 @@ class ItemType(str, Enum):
     MOUNTED_DATA_FACTORY = "MountedDataFactory"
     NOTEBOOK = "Notebook"
     ONTOLOGY = "Ontology"
+    ORG_APP = "OrgApp"
     PAGINATED_REPORT = "PaginatedReport"
     REFLEX = "Reflex"
     REPORT = "Report"
@@ -108,6 +109,7 @@ SERIAL_ITEM_PUBLISH_ORDER: dict[int, ItemType] = {
     27: ItemType.ML_EXPERIMENT,
     28: ItemType.ONTOLOGY,
     29: ItemType.MAP,
+    30: ItemType.ORG_APP,
 }
 
 

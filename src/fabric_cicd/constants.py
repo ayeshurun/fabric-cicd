@@ -66,6 +66,7 @@ class ItemType(str, Enum):
     NOTEBOOK = "Notebook"
     ONTOLOGY = "Ontology"
     ORG_APP = "OrgApp"
+    ORG_APP_AUDIENCE = "OrgAppAudience"
     PAGINATED_REPORT = "PaginatedReport"
     REFLEX = "Reflex"
     REPORT = "Report"
@@ -110,6 +111,7 @@ SERIAL_ITEM_PUBLISH_ORDER: dict[int, ItemType] = {
     28: ItemType.ONTOLOGY,
     29: ItemType.MAP,
     30: ItemType.ORG_APP,
+    31: ItemType.ORG_APP_AUDIENCE,
 }
 
 

@@ -10,7 +10,6 @@
 ### ⚡ Additional Optimizations
 
 * Improve performance of the `file_path` parameter filter and repository folder refresh by [ayeshurun](https://github.com/ayeshurun) ([#1044](https://github.com/microsoft/fabric-cicd/issues/1044))
-* Add HTTP trace output file validation condition by [shirasassoon](https://github.com/shirasassoon) ([#1048](https://github.com/microsoft/fabric-cicd/issues/1048))
 
 ## [v1.2.0](https://pypi.org/project/fabric-cicd/1.2.0) - June 30, 2026
 

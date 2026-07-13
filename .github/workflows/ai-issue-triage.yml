@@ -54,8 +54,8 @@ jobs:
             #   Testing (fork):   suppress both  → true  / true
             #   Production:       enable both    → false / false
             # -------------------------------------------------------
-            SUPPRESS_LABELS: "false"
-            SUPPRESS_COMMENTS: "false"
+            SUPPRESS_LABELS: "true"
+            SUPPRESS_COMMENTS: "true"
             # Tier-2 handoff to the Copilot coding agent (off by default — opt-in only).
             # A workflow_dispatch run can arm it per-run via the `enable_handoff` input,
             # without changing the branch defaults (e.g. the suppressed fork-dry-run branch).

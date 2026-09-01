@@ -4,14 +4,14 @@
 """
 Tests for Org App / Org App Audience custom file processing.
 
-The source-controlled definition.json references other items by their workspace-agnostic
-"itemLogicalId". On deployment these references must be rewritten to the deployed
-"itemId" and the "folderObjectId" of the folder the referenced item resides in
-(the workspace id when the item is not inside a folder).
+The source-controlled definition.json references other items by their display name and type.
+On deployment these references must carry the deployed "itemId" and the "folderObjectId" of
+the folder the referenced item resides in (the workspace id when the item is not inside a
+folder). These ids are resolved regardless of whether the source reference used the
+workspace-agnostic "itemLogicalId" key.
 """
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
@@ -33,29 +33,20 @@ class _FakeFile:
         self.contents = contents
 
 
-def _make_workspace(folder_id: str = "", guid: str = NOTEBOOK_GUID):
-    """Build a fake workspace with a single deployed Notebook in the repository."""
-    notebook = Item(
-        type="Notebook",
-        name="test3",
-        description="",
-        guid=guid,
-        logical_id=NOTEBOOK_LOGICAL_ID,
-        folder_id=folder_id,
-    )
-    repository_items = {"Notebook": {"test3": notebook}}
+class _FakeWorkspace:
+    """Fake workspace exposing repository_items keyed by name, as the real workspace does."""
 
-    def convert_id_to_name(item_type, generic_id, _lookup_type):
-        for item in repository_items.get(item_type, {}).values():
-            if item.logical_id == generic_id:
-                return item.name
-        return None
-
-    return SimpleNamespace(
-        workspace_id=WORKSPACE_ID,
-        repository_items=repository_items,
-        _convert_id_to_name=convert_id_to_name,
-    )
+    def __init__(self, folder_id: str = "", guid: str = NOTEBOOK_GUID) -> None:
+        self.workspace_id = WORKSPACE_ID
+        notebook = Item(
+            type="Notebook",
+            name="test3",
+            description="",
+            guid=guid,
+            logical_id=NOTEBOOK_LOGICAL_ID,
+            folder_id=folder_id,
+        )
+        self.repository_items = {"Notebook": {"test3": notebook}}
 
 
 def _reference_definition():
@@ -75,7 +66,7 @@ def _reference_definition():
 
 def test_replaces_logical_id_with_item_id_and_workspace_folder():
     """When the item is at the workspace root, folderObjectId resolves to the workspace id."""
-    workspace = _make_workspace(folder_id="")
+    workspace = _FakeWorkspace(folder_id="")
     file_obj = _FakeFile("definition.json", json.dumps(_reference_definition()))
 
     result = json.loads(func_process_file(workspace, None, file_obj))
@@ -91,7 +82,7 @@ def test_replaces_logical_id_with_item_id_and_workspace_folder():
 
 def test_replaces_folder_object_id_with_item_folder():
     """When the item lives inside a folder, folderObjectId resolves to that folder id."""
-    workspace = _make_workspace(folder_id=FOLDER_ID)
+    workspace = _FakeWorkspace(folder_id=FOLDER_ID)
     file_obj = _FakeFile("definition.json", json.dumps(_reference_definition()))
 
     result = json.loads(func_process_file(workspace, None, file_obj))
@@ -103,7 +94,7 @@ def test_replaces_folder_object_id_with_item_folder():
 
 def test_preserves_key_order():
     """The resolved itemId/folderObjectId replace itemLogicalId in place, preserving order."""
-    workspace = _make_workspace(folder_id="")
+    workspace = _FakeWorkspace(folder_id="")
     file_obj = _FakeFile("definition.json", json.dumps(_reference_definition()))
 
     result = json.loads(func_process_file(workspace, None, file_obj))
@@ -112,9 +103,55 @@ def test_preserves_key_order():
     assert keys == ["elementType", "elementId", "itemType", "itemId", "folderObjectId", "displayName"]
 
 
+def test_sets_ids_when_logical_id_absent():
+    """A reference without itemLogicalId still gets itemId and folderObjectId set."""
+    workspace = _FakeWorkspace(folder_id=FOLDER_ID)
+    body = {
+        "elements": [
+            {
+                "elementType": "item",
+                "itemType": "Notebook",
+                "displayName": "test3",
+            }
+        ]
+    }
+    file_obj = _FakeFile("definition.json", json.dumps(body))
+
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    element = result["elements"][0]
+
+    assert element["itemId"] == NOTEBOOK_GUID
+    assert element["folderObjectId"] == FOLDER_ID
+
+
+def test_overwrites_existing_ids():
+    """Existing itemId/folderObjectId values are overwritten in place with the resolved ids."""
+    workspace = _FakeWorkspace(folder_id=FOLDER_ID)
+    body = {
+        "elements": [
+            {
+                "elementType": "item",
+                "itemType": "Notebook",
+                "itemId": "stale-item-id",
+                "folderObjectId": "stale-folder-id",
+                "displayName": "test3",
+            }
+        ]
+    }
+    file_obj = _FakeFile("definition.json", json.dumps(body))
+
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    element = result["elements"][0]
+
+    assert element["itemId"] == NOTEBOOK_GUID
+    assert element["folderObjectId"] == FOLDER_ID
+    # Order is preserved when ids already exist
+    assert list(element.keys()) == ["elementType", "itemType", "itemId", "folderObjectId", "displayName"]
+
+
 def test_processes_nested_references():
     """References nested anywhere in the definition body are resolved."""
-    workspace = _make_workspace(folder_id="")
+    workspace = _FakeWorkspace(folder_id="")
     body = {
         "audience": {
             "sections": [
@@ -140,7 +177,7 @@ def test_processes_nested_references():
 
 def test_non_definition_file_is_untouched():
     """Files other than definition.json are returned unchanged."""
-    workspace = _make_workspace()
+    workspace = _FakeWorkspace()
     original = json.dumps(_reference_definition())
     file_obj = _FakeFile(".platform", original)
 
@@ -148,13 +185,12 @@ def test_non_definition_file_is_untouched():
 
 
 def test_missing_reference_raises_parsing_error():
-    """An unresolvable logical id raises a ParsingError."""
-    workspace = _make_workspace()
+    """An unresolvable reference raises a ParsingError."""
+    workspace = _FakeWorkspace()
     body = {
         "elements": [
             {
                 "itemType": "Notebook",
-                "itemLogicalId": "00000000-0000-0000-0000-000000000000",
                 "displayName": "missing",
             }
         ]
@@ -167,7 +203,7 @@ def test_missing_reference_raises_parsing_error():
 
 def test_reference_not_yet_deployed_raises_parsing_error():
     """A referenced item present in the repository but not yet deployed raises a ParsingError."""
-    workspace = _make_workspace(guid="")
+    workspace = _FakeWorkspace(guid="")
     file_obj = _FakeFile("definition.json", json.dumps(_reference_definition()))
 
     with pytest.raises(ParsingError):

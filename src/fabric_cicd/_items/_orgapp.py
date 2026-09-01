@@ -23,12 +23,13 @@ def func_process_file(workspace_obj: FabricWorkspace, _item_obj: Item, file_obj:
     """
     Custom file processing for Org App and Org App Audience items.
 
-    In the source-controlled definition.json, referenced items are identified by their
-    workspace-agnostic logical id via the "itemLogicalId" key. The Fabric API expects the
-    deployed item id ("itemId") and the object id of the folder the item resides in
+    In the source-controlled definition.json, other items are referenced by their
+    display name and type. To deploy the item, each reference must carry the deployed
+    item id ("itemId") and the object id of the folder the item resides in
     ("folderObjectId", which is the workspace id when the item is not inside a folder).
-    This function replaces each "itemLogicalId" reference with the resolved "itemId" and
-    "folderObjectId" of the respective deployed item.
+    This function resolves every item reference and sets its "itemId" and
+    "folderObjectId", regardless of whether the source reference used the
+    workspace-agnostic "itemLogicalId" key.
 
     Args:
         workspace_obj: The FabricWorkspace object.
@@ -39,71 +40,112 @@ def func_process_file(workspace_obj: FabricWorkspace, _item_obj: Item, file_obj:
         return file_obj.contents
 
     definition_body = json.loads(file_obj.contents)
-    processed_body = _replace_item_references(workspace_obj, definition_body)
+    processed_body = _resolve_item_references(workspace_obj, definition_body)
 
     return json.dumps(processed_body, indent=2)
 
 
-def _replace_item_references(workspace_obj: FabricWorkspace, node: object) -> object:
+def _resolve_item_references(workspace_obj: FabricWorkspace, value: object) -> object:
     """
-    Recursively walks the definition body and replaces "itemLogicalId" references with the
-    resolved "itemId" and "folderObjectId" of the respective deployed item.
+    Recursively walks the definition body and resolves every item reference to its
+    deployed "itemId" and "folderObjectId".
 
     Args:
         workspace_obj: The FabricWorkspace object.
-        node: The current node (dict, list, or scalar) in the definition body.
+        value: The current value (dict, list, or scalar) in the definition body.
     """
-    if isinstance(node, dict):
-        if "itemLogicalId" in node:
-            node = _resolve_reference(workspace_obj, node)
-        return {key: _replace_item_references(workspace_obj, value) for key, value in node.items()}
-    if isinstance(node, list):
-        return [_replace_item_references(workspace_obj, element) for element in node]
-    return node
+    if isinstance(value, dict):
+        if _is_item_reference(value):
+            value = _resolve_reference(workspace_obj, value)
+        return {key: _resolve_item_references(workspace_obj, child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_resolve_item_references(workspace_obj, element) for element in value]
+    return value
 
 
-def _resolve_reference(workspace_obj: FabricWorkspace, node: dict) -> dict:
+def _is_item_reference(value: dict) -> bool:
     """
-    Resolves a single item reference by replacing its "itemLogicalId" with the deployed
-    "itemId" and "folderObjectId" while preserving the original key order.
+    Returns True when the value is a reference to another item, identified by carrying both
+    an item type and a display name.
+
+    Args:
+        value: The value to inspect.
+    """
+    return "itemType" in value and "displayName" in value
+
+
+def _resolve_reference(workspace_obj: FabricWorkspace, reference: dict) -> dict:
+    """
+    Resolves a single item reference to the deployed item's "itemId" and "folderObjectId".
+
+    The referenced item is located by its display name and type. The resolved ids are set
+    regardless of whether the source reference used the "itemLogicalId" key.
 
     Args:
         workspace_obj: The FabricWorkspace object.
-        node: The reference object containing an "itemLogicalId" key.
+        reference: The reference object identifying another item.
     """
-    item_type = node.get("itemType")
-    logical_id = node.get("itemLogicalId")
+    item_type = reference.get("itemType")
+    display_name = reference.get("displayName")
 
-    referenced_name = (
-        workspace_obj._convert_id_to_name(item_type, logical_id, "Repository")
-        if item_type in workspace_obj.repository_items
-        else None
-    )
-    if referenced_name is None:
-        msg = f"Cannot resolve item reference with logicalId '{logical_id}' of type '{item_type}' in the repository."
+    item_details = workspace_obj.repository_items.get(item_type, {}).get(display_name)
+    if item_details is None:
+        msg = f"Cannot resolve referenced item '{display_name}' of type '{item_type}' in the repository."
         raise ParsingError(msg, logger)
 
-    item_details = workspace_obj.repository_items[item_type][referenced_name]
     if not item_details.guid:
-        msg = (
-            f"Cannot replace logicalId '{logical_id}' as referenced item "
-            f"'{referenced_name}.{item_type}' is not yet deployed."
-        )
+        msg = f"Cannot deploy reference to '{display_name}.{item_type}' as it is not yet deployed."
         raise ParsingError(msg, logger)
 
     # folderObjectId is the object id of the folder the item lives in, or the workspace id
     # when the item is not inside a folder
     folder_object_id = item_details.folder_id or workspace_obj.workspace_id
 
-    resolved_node = {}
-    for key, value in node.items():
-        if key == "itemLogicalId":
-            resolved_node["itemId"] = item_details.guid
-            resolved_node["folderObjectId"] = folder_object_id
-        else:
-            resolved_node[key] = value
+    return _apply_resolved_ids(reference, item_details.guid, folder_object_id)
 
-    return resolved_node
+
+def _apply_resolved_ids(reference: dict, item_id: str, folder_object_id: str) -> dict:
+    """
+    Returns a copy of the reference with "itemId" and "folderObjectId" set to the resolved
+    values, dropping the workspace-agnostic "itemLogicalId" key when present while otherwise
+    preserving the original key order.
+
+    Args:
+        reference: The reference object identifying another item.
+        item_id: The resolved deployed item id.
+        folder_object_id: The resolved folder object id (or workspace id).
+    """
+    resolved = {}
+    item_id_set = False
+    folder_set = False
+
+    for key, value in reference.items():
+        # Replace the logical id reference with both resolved ids, grouped in place
+        if key == "itemLogicalId":
+            if not item_id_set:
+                resolved["itemId"] = item_id
+                item_id_set = True
+            if not folder_set:
+                resolved["folderObjectId"] = folder_object_id
+                folder_set = True
+        # Overwrite an existing id in place
+        elif key == "itemId":
+            if not item_id_set:
+                resolved["itemId"] = item_id
+                item_id_set = True
+        elif key == "folderObjectId":
+            if not folder_set:
+                resolved["folderObjectId"] = folder_object_id
+                folder_set = True
+        else:
+            resolved[key] = value
+
+    if not item_id_set:
+        resolved["itemId"] = item_id
+    if not folder_set:
+        resolved["folderObjectId"] = folder_object_id
+
+    return resolved
 
 
 class OrgAppPublisher(ItemPublisher):

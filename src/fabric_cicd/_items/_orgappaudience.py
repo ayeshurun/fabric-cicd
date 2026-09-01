@@ -5,7 +5,7 @@
 
 from fabric_cicd._common._item import Item
 from fabric_cicd._items._base_publisher import ItemPublisher
-from fabric_cicd._items._orgapp import func_process_file
+from fabric_cicd._items._orgapp_shared import func_process_file
 from fabric_cicd.constants import ItemType
 
 

@@ -17,7 +17,7 @@ import pytest
 
 from fabric_cicd._common._exceptions import ParsingError
 from fabric_cicd._common._item import Item
-from fabric_cicd._items._orgapp import func_process_file
+from fabric_cicd._items._orgapp_shared import func_process_file
 
 WORKSPACE_ID = "11111111-1111-1111-1111-111111111111"
 NOTEBOOK_LOGICAL_ID = "f898ec29-1341-b31b-4977-45a2c4d49570"
@@ -212,15 +212,36 @@ def test_reference_not_yet_deployed_raises_parsing_error():
         func_process_file(workspace, None, file_obj)
 
 
-def test_non_item_element_is_untouched():
-    """Elements whose elementType is not 'item' are not treated as references."""
+def test_orgapp_audience_reference_identified_by_item_type():
+    """A reference without elementType but with itemType (Org App Audience layout) is resolved."""
+    workspace = _FakeWorkspace(folder_id=FOLDER_ID)
+    body = {
+        "audiences": [
+            {
+                "itemType": "Notebook",
+                "itemLogicalId": NOTEBOOK_LOGICAL_ID,
+                "displayName": "test3",
+            }
+        ]
+    }
+    file_obj = _FakeFile("definition.json", json.dumps(body))
+
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    reference = result["audiences"][0]
+
+    assert reference["itemId"] == NOTEBOOK_GUID
+    assert reference["folderObjectId"] == FOLDER_ID
+    assert "itemLogicalId" not in reference
+
+
+def test_non_reference_element_is_untouched():
+    """Elements that are neither elementType 'item' nor carry an itemType are left untouched."""
     workspace = _FakeWorkspace()
     body = {
         "elements": [
             {
                 "elementType": "section",
-                "itemType": "Notebook",
-                "displayName": "test3",
+                "displayName": "My Section",
             }
         ]
     }
@@ -231,11 +252,13 @@ def test_non_item_element_is_untouched():
 
     assert "itemId" not in element
     assert "folderObjectId" not in element
-    assert element == {"elementType": "section", "itemType": "Notebook", "displayName": "test3"}
+    assert element == {"elementType": "section", "displayName": "My Section"}
 
 
 def test_orgapp_audience_uses_same_processing():
-    """OrgAppAudience publisher reuses the same module-level func_process_file."""
+    """OrgAppAudience and OrgApp publishers reuse the same shared func_process_file."""
+    from fabric_cicd._items._orgapp import func_process_file as orgapp_func
     from fabric_cicd._items._orgappaudience import func_process_file as audience_func
 
     assert audience_func is func_process_file
+    assert orgapp_func is func_process_file

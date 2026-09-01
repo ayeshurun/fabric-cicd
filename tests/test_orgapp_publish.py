@@ -17,7 +17,7 @@ import pytest
 
 from fabric_cicd._common._exceptions import ParsingError
 from fabric_cicd._common._item import Item
-from fabric_cicd._items._orgapp_shared import func_process_file
+from fabric_cicd._items._orgapp import func_process_file
 
 WORKSPACE_ID = "11111111-1111-1111-1111-111111111111"
 NOTEBOOK_LOGICAL_ID = "f898ec29-1341-b31b-4977-45a2c4d49570"
@@ -256,9 +256,7 @@ def test_non_reference_element_is_untouched():
 
 
 def test_orgapp_audience_uses_same_processing():
-    """OrgAppAudience and OrgApp publishers reuse the same shared func_process_file."""
-    from fabric_cicd._items._orgapp import func_process_file as orgapp_func
+    """OrgAppAudience reuses the func_process_file defined in the OrgApp module."""
     from fabric_cicd._items._orgappaudience import func_process_file as audience_func
 
     assert audience_func is func_process_file
-    assert orgapp_func is func_process_file

@@ -71,7 +71,7 @@ def _is_item_reference(value: dict) -> bool:
     Args:
         value: The value to inspect.
     """
-    return value.get("elementType") == "item"
+    return value.get("elementType", "") == "item"
 
 
 def _resolve_reference(workspace_obj: FabricWorkspace, reference: dict) -> dict:
@@ -85,8 +85,8 @@ def _resolve_reference(workspace_obj: FabricWorkspace, reference: dict) -> dict:
         workspace_obj: The FabricWorkspace object.
         reference: The reference object identifying another item.
     """
-    item_type = reference.get("itemType")
-    display_name = reference.get("displayName")
+    item_type = reference.get("itemType", "")
+    display_name = reference.get("displayName", "")
 
     item_details = workspace_obj.repository_items.get(item_type, {}).get(display_name)
     if item_details is None:

@@ -375,7 +375,7 @@ class FabricWorkspace:
                 # (e.g. KQLDatabase under `.Eventhouse/.children/`, OrgAppAudience under
                 # `.OrgApp/.children/`), requires extracting the parent folder path before the
                 # parent container, not just the immediate parent directory
-                child_folder_path_regex = constants.CHILD_ITEM_FOLDER_PATH_REGEX_MAPPING.get(item_type)
+                child_folder_path_regex = constants.CHILD_ITEM_FOLDER_PATH_REGEX_MAPPING.get(item_type, None)
                 if child_folder_path_regex:
                     pattern = re.compile(child_folder_path_regex)
                     match = pattern.match(relative_path)

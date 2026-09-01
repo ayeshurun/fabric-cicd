@@ -157,6 +157,7 @@ def test_processes_nested_references():
             "sections": [
                 {
                     "content": {
+                        "elementType": "item",
                         "itemType": "Notebook",
                         "itemLogicalId": NOTEBOOK_LOGICAL_ID,
                         "displayName": "test3",
@@ -190,6 +191,7 @@ def test_missing_reference_raises_parsing_error():
     body = {
         "elements": [
             {
+                "elementType": "item",
                 "itemType": "Notebook",
                 "displayName": "missing",
             }
@@ -208,6 +210,28 @@ def test_reference_not_yet_deployed_raises_parsing_error():
 
     with pytest.raises(ParsingError):
         func_process_file(workspace, None, file_obj)
+
+
+def test_non_item_element_is_untouched():
+    """Elements whose elementType is not 'item' are not treated as references."""
+    workspace = _FakeWorkspace()
+    body = {
+        "elements": [
+            {
+                "elementType": "section",
+                "itemType": "Notebook",
+                "displayName": "test3",
+            }
+        ]
+    }
+    file_obj = _FakeFile("definition.json", json.dumps(body))
+
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    element = result["elements"][0]
+
+    assert "itemId" not in element
+    assert "folderObjectId" not in element
+    assert element == {"elementType": "section", "itemType": "Notebook", "displayName": "test3"}
 
 
 def test_orgapp_audience_uses_same_processing():

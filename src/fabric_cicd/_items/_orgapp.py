@@ -65,13 +65,13 @@ def _resolve_item_references(workspace_obj: FabricWorkspace, value: object) -> o
 
 def _is_item_reference(value: dict) -> bool:
     """
-    Returns True when the value is a reference to another item, identified by carrying both
-    an item type and a display name.
+    Returns True when the value is a reference to another item, identified by an
+    "elementType" of "item".
 
     Args:
         value: The value to inspect.
     """
-    return "itemType" in value and "displayName" in value
+    return value.get("elementType") == "item"
 
 
 def _resolve_reference(workspace_obj: FabricWorkspace, reference: dict) -> dict:

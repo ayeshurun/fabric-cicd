@@ -1,0 +1,181 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+"""
+Tests for Org App / Org App Audience custom file processing.
+
+The source-controlled definition.json references other items by their workspace-agnostic
+"itemLogicalId". On deployment these references must be rewritten to the deployed
+"itemId" and the "folderObjectId" of the folder the referenced item resides in
+(the workspace id when the item is not inside a folder).
+"""
+
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from fabric_cicd._common._exceptions import ParsingError
+from fabric_cicd._common._item import Item
+from fabric_cicd._items._orgapp import func_process_file
+
+WORKSPACE_ID = "11111111-1111-1111-1111-111111111111"
+NOTEBOOK_LOGICAL_ID = "f898ec29-1341-b31b-4977-45a2c4d49570"
+NOTEBOOK_GUID = "22222222-2222-2222-2222-222222222222"
+FOLDER_ID = "33333333-3333-3333-3333-333333333333"
+
+
+class _FakeFile:
+    """Minimal stand-in for the File object exposing name and contents."""
+
+    def __init__(self, name: str, contents: str) -> None:
+        self.name = name
+        self.contents = contents
+
+
+def _make_workspace(folder_id: str = "", guid: str = NOTEBOOK_GUID):
+    """Build a fake workspace with a single deployed Notebook in the repository."""
+    notebook = Item(
+        type="Notebook",
+        name="test3",
+        description="",
+        guid=guid,
+        logical_id=NOTEBOOK_LOGICAL_ID,
+        folder_id=folder_id,
+    )
+    repository_items = {"Notebook": {"test3": notebook}}
+
+    def convert_id_to_name(item_type, generic_id, _lookup_type):
+        for item in repository_items.get(item_type, {}).values():
+            if item.logical_id == generic_id:
+                return item.name
+        return None
+
+    return SimpleNamespace(
+        workspace_id=WORKSPACE_ID,
+        repository_items=repository_items,
+        _convert_id_to_name=convert_id_to_name,
+    )
+
+
+def _reference_definition():
+    """Return a definition body containing a single item reference (as in the task example)."""
+    return {
+        "elements": [
+            {
+                "elementType": "item",
+                "elementId": "f5c6817f-9f02-46a9-bc6d-2a88494dc431",
+                "itemType": "Notebook",
+                "itemLogicalId": NOTEBOOK_LOGICAL_ID,
+                "displayName": "test3",
+            }
+        ]
+    }
+
+
+def test_replaces_logical_id_with_item_id_and_workspace_folder():
+    """When the item is at the workspace root, folderObjectId resolves to the workspace id."""
+    workspace = _make_workspace(folder_id="")
+    file_obj = _FakeFile("definition.json", json.dumps(_reference_definition()))
+
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    element = result["elements"][0]
+
+    assert "itemLogicalId" not in element
+    assert element["itemId"] == NOTEBOOK_GUID
+    assert element["folderObjectId"] == WORKSPACE_ID
+    # Non-reference keys are preserved
+    assert element["elementType"] == "item"
+    assert element["displayName"] == "test3"
+
+
+def test_replaces_folder_object_id_with_item_folder():
+    """When the item lives inside a folder, folderObjectId resolves to that folder id."""
+    workspace = _make_workspace(folder_id=FOLDER_ID)
+    file_obj = _FakeFile("definition.json", json.dumps(_reference_definition()))
+
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    element = result["elements"][0]
+
+    assert element["itemId"] == NOTEBOOK_GUID
+    assert element["folderObjectId"] == FOLDER_ID
+
+
+def test_preserves_key_order():
+    """The resolved itemId/folderObjectId replace itemLogicalId in place, preserving order."""
+    workspace = _make_workspace(folder_id="")
+    file_obj = _FakeFile("definition.json", json.dumps(_reference_definition()))
+
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    keys = list(result["elements"][0].keys())
+
+    assert keys == ["elementType", "elementId", "itemType", "itemId", "folderObjectId", "displayName"]
+
+
+def test_processes_nested_references():
+    """References nested anywhere in the definition body are resolved."""
+    workspace = _make_workspace(folder_id="")
+    body = {
+        "audience": {
+            "sections": [
+                {
+                    "content": {
+                        "itemType": "Notebook",
+                        "itemLogicalId": NOTEBOOK_LOGICAL_ID,
+                        "displayName": "test3",
+                    }
+                }
+            ]
+        }
+    }
+    file_obj = _FakeFile("definition.json", json.dumps(body))
+
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    content = result["audience"]["sections"][0]["content"]
+
+    assert content["itemId"] == NOTEBOOK_GUID
+    assert content["folderObjectId"] == WORKSPACE_ID
+    assert "itemLogicalId" not in content
+
+
+def test_non_definition_file_is_untouched():
+    """Files other than definition.json are returned unchanged."""
+    workspace = _make_workspace()
+    original = json.dumps(_reference_definition())
+    file_obj = _FakeFile(".platform", original)
+
+    assert func_process_file(workspace, None, file_obj) == original
+
+
+def test_missing_reference_raises_parsing_error():
+    """An unresolvable logical id raises a ParsingError."""
+    workspace = _make_workspace()
+    body = {
+        "elements": [
+            {
+                "itemType": "Notebook",
+                "itemLogicalId": "00000000-0000-0000-0000-000000000000",
+                "displayName": "missing",
+            }
+        ]
+    }
+    file_obj = _FakeFile("definition.json", json.dumps(body))
+
+    with pytest.raises(ParsingError):
+        func_process_file(workspace, None, file_obj)
+
+
+def test_reference_not_yet_deployed_raises_parsing_error():
+    """A referenced item present in the repository but not yet deployed raises a ParsingError."""
+    workspace = _make_workspace(guid="")
+    file_obj = _FakeFile("definition.json", json.dumps(_reference_definition()))
+
+    with pytest.raises(ParsingError):
+        func_process_file(workspace, None, file_obj)
+
+
+def test_orgapp_audience_uses_same_processing():
+    """OrgAppAudience publisher reuses the same module-level func_process_file."""
+    from fabric_cicd._items._orgappaudience import func_process_file as audience_func
+
+    assert audience_func is func_process_file

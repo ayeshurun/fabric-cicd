@@ -155,7 +155,7 @@
 ## Org App Audience
 
 - **Parameterization:**
-    - The referenced Org App and its member items (e.g., Report, Semantic Model, Dashboard) that exist in a different workspace will always point to the original item unless parameterized in the `find_replace` section of the `parameter.yml` file.
+    - The referenced Org App and its member items (e.g., Notebook, Report) that exist in a different workspace will always point to the original item unless parameterized in the `find_replace` section of the `parameter.yml` file.
     - Referenced items within the same workspace are automatically re-pointed to the new item in the target workspace.
 
 ## Paginated Report

@@ -84,7 +84,10 @@ def _resolve_reference(workspace_obj: FabricWorkspace, reference: dict) -> dict:
     """
     Resolves a single item reference to the deployed item's "itemId" and "folderObjectId".
 
-    The referenced item is located by its display name and type. The resolved ids are set
+    The referenced item is located by its display name and type. When the referenced item is
+    not part of the repository being deployed (for example, it lives in a different workspace),
+    the reference is left untouched so it keeps pointing to the original item, which can be
+    re-pointed through the "find_replace" section of parameter.yml. The resolved ids are set
     regardless of whether the source reference used the "itemLogicalId" key.
 
     Args:
@@ -96,8 +99,9 @@ def _resolve_reference(workspace_obj: FabricWorkspace, reference: dict) -> dict:
 
     item_details = workspace_obj.repository_items.get(item_type, {}).get(display_name)
     if item_details is None:
-        msg = f"Cannot resolve referenced item '{display_name}' of type '{item_type}' in the repository."
-        raise ParsingError(msg, logger)
+        # The referenced item is not in the repository (e.g. a different workspace); leave the
+        # reference unchanged so it keeps pointing to the original item.
+        return reference
 
     if not item_details.guid:
         msg = f"Cannot deploy reference to '{display_name}.{item_type}' as it is not yet deployed."

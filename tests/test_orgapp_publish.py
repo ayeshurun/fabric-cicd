@@ -185,22 +185,23 @@ def test_non_definition_file_is_untouched():
     assert func_process_file(workspace, None, file_obj) == original
 
 
-def test_missing_reference_raises_parsing_error():
-    """An unresolvable reference raises a ParsingError."""
+def test_reference_outside_repository_is_left_untouched():
+    """A reference to an item not in the repository (e.g. a different workspace) is left as-is."""
     workspace = _FakeWorkspace()
-    body = {
-        "elements": [
-            {
-                "elementType": "item",
-                "itemType": "Notebook",
-                "displayName": "missing",
-            }
-        ]
+    reference = {
+        "elementType": "item",
+        "itemType": "Notebook",
+        "itemLogicalId": "99999999-9999-9999-9999-999999999999",
+        "displayName": "missing",
     }
+    body = {"elements": [reference]}
     file_obj = _FakeFile("definition.json", json.dumps(body))
 
-    with pytest.raises(ParsingError):
-        func_process_file(workspace, None, file_obj)
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    element = result["elements"][0]
+
+    # The reference is unchanged: no resolved ids are injected and the original keys remain.
+    assert element == reference
 
 
 def test_reference_not_yet_deployed_raises_parsing_error():

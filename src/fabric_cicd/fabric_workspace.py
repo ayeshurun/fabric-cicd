@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,16 @@ from fabric_cicd._common._logging import log_header
 from fabric_cicd.constants import FeatureFlag, ItemType
 
 logger = logging.getLogger(__name__)
+
+
+def _is_folder_not_empty_error(exception: Exception) -> bool:
+    """Return True if the exception looks like the folder-not-empty eventual-consistency race.
+
+    Used by `_unpublish_folders()` to decide whether a failed folder DELETE is worth retrying
+    (the backend hasn't yet processed a just-deleted child folder) versus a permanent failure
+    (e.g. permissions) that should be reported immediately instead of retried every pass.
+    """
+    return "not empty" in str(exception).lower()
 
 
 class FabricWorkspace:
@@ -1218,8 +1229,10 @@ class FabricWorkspace:
         # it as empty, which may lag behind the deletion of its last child folder. Retrying in
         # subsequent passes (bounded by the number of folders to delete) absorbs that eventual
         # consistency delay without turning genuine, non-transient failures into an infinite loop.
+        # Only failures that look like this "not empty" race are retried; other errors (e.g.
+        # permissions) are treated as permanent and are not retried, to avoid wasted API calls.
         max_passes = len(pending_folder_ids)
-        for _ in range(max_passes):
+        for pass_number in range(max_passes):
             if not pending_folder_ids:
                 break
 
@@ -1234,10 +1247,16 @@ class FabricWorkspace:
                     logger.debug(f"Unpublished folder: {folder_id}")
                     deleted_any = True
                 except Exception as e:
-                    # Defer to the next pass instead of giving up immediately, in case the failure
-                    # is due to a child folder deletion not yet being reflected server-side.
-                    still_pending_folder_ids.append(folder_id)
                     last_exception_by_folder_id[folder_id] = e
+                    if _is_folder_not_empty_error(e):
+                        # Defer to the next pass instead of giving up immediately, in case the
+                        # failure is due to a child folder deletion not yet being reflected
+                        # server-side.
+                        still_pending_folder_ids.append(folder_id)
+                    else:
+                        # Not the eventual-consistency race this loop is designed for; treat as
+                        # permanent so it isn't retried on every subsequent pass.
+                        logger.warning(f"Failed to unpublish folder {folder_id}.  Raw exception: {e}")
 
             pending_folder_ids = still_pending_folder_ids
 
@@ -1245,6 +1264,11 @@ class FabricWorkspace:
             # any remaining failures are treated as genuine and logged below.
             if not deleted_any:
                 break
+
+            # Give the backend a brief moment to propagate the deletions from this pass before
+            # retrying folders still pending. Overridable so unit tests can run instantly.
+            if pending_folder_ids and pass_number < max_passes - 1:
+                time.sleep(float(os.environ.get(constants.EnvVar.RETRY_DELAY_OVERRIDE_SECONDS.value, 1)))
 
         for folder_id in pending_folder_ids:
             logger.warning(

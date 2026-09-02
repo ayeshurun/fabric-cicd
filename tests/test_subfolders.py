@@ -726,6 +726,59 @@ def test_unpublish_folders_retries_parent_after_child_deleted(
     assert delete_calls.index(child_deletes[0]) < delete_calls.index(parent_deletes[-1])
 
 
+def test_unpublish_folders_retry_budget_not_starved_by_shrinking_pending_set(
+    tmp_path, patched_fabric_workspace, valid_workspace_id, monkeypatch
+):
+    """A folder needing more attempts than there are pending folders must still succeed.
+
+    Regression test: the pass budget must not be derived solely from the (shrinking) count of
+    pending folders. With only two folders total, the child succeeds on its first attempt and
+    drops out of the pending set, while the parent needs three attempts (two transient failures
+    then success) to converge. If the retry budget were `len(pending_folder_ids)` (== 2 here), the
+    parent would run out of attempts and be incorrectly reported as a permanent failure even
+    though every failure was a transient "not empty" race.
+    """
+    workspace = patched_fabric_workspace(
+        workspace_id=valid_workspace_id,
+        repository_directory=str(tmp_path),
+        item_type_in_scope=["Notebook"],
+    )
+
+    workspace.repository_folders = {}
+    workspace.deployed_folders = {
+        "/Parent": "parent-folder-id",
+        "/Parent/Child": "child-folder-id",
+    }
+    workspace.deployed_items = {}
+
+    delete_calls = []
+    parent_attempts = 0
+
+    def fake_invoke(method, url, **_kwargs):
+        nonlocal parent_attempts
+        delete_calls.append(url)
+        if method == "DELETE" and url.endswith("/folders/parent-folder-id"):
+            parent_attempts += 1
+            if parent_attempts < 3:
+                error_message = (
+                    "Unhandled error occurred calling DELETE ... Message: The requested folder was not empty."
+                )
+                raise Exception(error_message)
+        return {"body": {}, "header": {}}
+
+    workspace.endpoint.invoke.side_effect = fake_invoke
+
+    monkeypatch.setenv("FABRIC_CICD_RETRY_DELAY_OVERRIDE_SECONDS", "0")
+    workspace._unpublish_folders()
+
+    parent_deletes = [url for url in delete_calls if url.endswith("/folders/parent-folder-id")]
+
+    # Parent needed 3 attempts to succeed; it must not be starved of retries just because only
+    # one other folder (the child) was ever pending alongside it.
+    assert parent_attempts == 3
+    assert len(parent_deletes) == 3
+
+
 def test_unpublish_folders_stops_retrying_on_persistent_failure(
     tmp_path, patched_fabric_workspace, valid_workspace_id, monkeypatch
 ):

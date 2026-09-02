@@ -84,11 +84,12 @@ def _resolve_reference(workspace_obj: FabricWorkspace, reference: dict) -> dict:
     """
     Resolves a single item reference to the deployed item's "itemId" and "folderObjectId".
 
-    The referenced item is located by its display name and type. When the referenced item is
-    not part of the repository being deployed (for example, it lives in a different workspace),
-    the reference is left untouched so it keeps pointing to the original item, which can be
-    re-pointed through the "find_replace" section of parameter.yml. The resolved ids are set
-    regardless of whether the source reference used the "itemLogicalId" key.
+    The referenced item is located by its display name and type, falling back to the logical id
+    the reference carries when no display name is present. When the referenced item is not part
+    of the repository being deployed (for example, it lives in a different workspace), the
+    reference is left untouched so it keeps pointing to the original item, which can be re-pointed
+    through the "find_replace" section of parameter.yml. The resolved ids are set regardless of
+    whether the source reference used the "itemLogicalId" key.
 
     Args:
         workspace_obj: The FabricWorkspace object.
@@ -97,14 +98,18 @@ def _resolve_reference(workspace_obj: FabricWorkspace, reference: dict) -> dict:
     item_type = reference.get("itemType", "")
     display_name = reference.get("displayName", "")
 
+    # Locate the referenced item by display name and type, falling back to the logical id the
+    # reference carries (references do not always include a display name).
     item_details = workspace_obj.repository_items.get(item_type, {}).get(display_name)
+    if item_details is None:
+        item_details = _find_item_by_logical_id(workspace_obj, reference)
     if item_details is None:
         # The referenced item is not in the repository (e.g. a different workspace); leave the
         # reference unchanged so it keeps pointing to the original item.
         return reference
 
     if not item_details.guid:
-        msg = f"Cannot deploy reference to '{display_name}.{item_type}' as it is not yet deployed."
+        msg = f"Cannot deploy reference to '{display_name or item_details.name}.{item_type}' as it is not yet deployed."
         raise ParsingError(msg, logger)
 
     # folderObjectId is the object id of the folder the item lives in, or the workspace id
@@ -112,6 +117,37 @@ def _resolve_reference(workspace_obj: FabricWorkspace, reference: dict) -> dict:
     folder_object_id = item_details.folder_id or workspace_obj.workspace_id
 
     return _apply_resolved_ids(reference, item_details.guid, folder_object_id)
+
+
+def _find_item_by_logical_id(workspace_obj: FabricWorkspace, reference: dict) -> Item:
+    """
+    Locates a repository item by the logical id carried in the reference.
+
+    A reference may identify its target by a workspace-agnostic logical id (in the
+    "itemLogicalId" or "itemId" key) rather than a display name. The candidate ids are matched
+    against the logical id of the repository items so that both "itemId" and "folderObjectId"
+    can be resolved. When an "itemType" is present the search is scoped to that type.
+
+    Args:
+        workspace_obj: The FabricWorkspace object.
+        reference: The reference object identifying another item.
+    """
+    candidate_ids = [reference.get("itemLogicalId", ""), reference.get("itemId", "")]
+    candidate_ids = [candidate for candidate in candidate_ids if candidate]
+    if not candidate_ids:
+        return None
+
+    item_type = reference.get("itemType", "")
+    if item_type:
+        buckets = [workspace_obj.repository_items.get(item_type, {})]
+    else:
+        buckets = list(workspace_obj.repository_items.values())
+
+    for bucket in buckets:
+        for item_details in bucket.values():
+            if item_details.logical_id and item_details.logical_id in candidate_ids:
+                return item_details
+    return None
 
 
 def _apply_resolved_ids(reference: dict, item_id: str, folder_object_id: str) -> dict:

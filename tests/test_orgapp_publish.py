@@ -185,6 +185,48 @@ def test_non_definition_file_is_untouched():
     assert func_process_file(workspace, None, file_obj) == original
 
 
+def test_resolves_by_logical_id_without_display_name():
+    """A reference identifying the item by logical id (no displayName) is fully resolved."""
+    workspace = _FakeWorkspace(folder_id=FOLDER_ID)
+    body = {
+        "elements": [
+            {
+                "elementType": "item",
+                "itemType": "Notebook",
+                "itemLogicalId": NOTEBOOK_LOGICAL_ID,
+            }
+        ]
+    }
+    file_obj = _FakeFile("definition.json", json.dumps(body))
+
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    element = result["elements"][0]
+
+    assert element["itemId"] == NOTEBOOK_GUID
+    assert element["folderObjectId"] == FOLDER_ID
+    assert "itemLogicalId" not in element
+
+
+def test_resolves_by_item_id_holding_logical_id_without_display_name():
+    """A reference whose itemId holds the logical id (no displayName) still gets folderObjectId."""
+    workspace = _FakeWorkspace(folder_id=FOLDER_ID)
+    body = {
+        "elements": [
+            {
+                "itemType": "Notebook",
+                "itemId": NOTEBOOK_LOGICAL_ID,
+            }
+        ]
+    }
+    file_obj = _FakeFile("definition.json", json.dumps(body))
+
+    result = json.loads(func_process_file(workspace, None, file_obj))
+    element = result["elements"][0]
+
+    assert element["itemId"] == NOTEBOOK_GUID
+    assert element["folderObjectId"] == FOLDER_ID
+
+
 def test_reference_outside_repository_is_left_untouched():
     """A reference to an item not in the repository (e.g. a different workspace) is left as-is."""
     workspace = _FakeWorkspace()

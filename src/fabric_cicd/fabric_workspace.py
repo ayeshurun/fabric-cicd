@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,27 @@ from fabric_cicd._common._logging import log_header
 from fabric_cicd.constants import FeatureFlag, ItemType
 
 logger = logging.getLogger(__name__)
+
+# Floor on the number of folder-delete retry passes in `_unpublish_folders()`, independent of how
+# many folders are currently pending. Without a floor, the pass budget (otherwise derived from the
+# shrinking pending-folder count) could starve a folder that needs more retry attempts than there
+# happen to be folders left to process.
+_MIN_FOLDER_DELETE_PASSES = 5
+
+
+def _is_folder_not_empty_error(exception: Exception) -> bool:
+    """Return True if the exception looks like the folder-not-empty eventual-consistency race.
+
+    Used by `_unpublish_folders()` to decide whether a failed folder DELETE is worth retrying
+    (the backend hasn't yet processed a just-deleted child folder) versus a permanent failure
+    (e.g. permissions) that should be reported immediately instead of retried every pass.
+
+    Note: this relies on a substring match against the raw exception text because the underlying
+    `FabricEndpoint.invoke()` error handling does not currently surface a structured error code for
+    this case, only the API's free-text message. If the API's wording for this error changes, this
+    check may need to be updated accordingly.
+    """
+    return "not empty" in str(exception).lower()
 
 
 class FabricWorkspace:
@@ -1210,18 +1232,62 @@ class FabricWorkspace:
 
         logger.info("Unpublishing Workspace Folders")
 
-        # Pop all folders
+        # Folders to remove, deepest paths first so children are always deleted before their parents
+        pending_folder_ids = [folder_id for folder_id in sorted_folder_ids if folder_id not in unorphaned_folders]
+        last_exception_by_folder_id = {}
 
-        for folder_id in sorted_folder_ids:
-            if folder_id not in unorphaned_folders:
-                # Folder deployed, but not in repository
+        # Delete folders in passes. A parent folder can only be deleted once the backend recognizes
+        # it as empty, which may lag behind the deletion of its last child folder. Retrying in
+        # subsequent passes absorbs that eventual consistency delay without turning genuine,
+        # non-transient failures into an infinite loop. Only failures that look like this "not
+        # empty" race are retried; other errors (e.g. permissions) are treated as permanent and
+        # are not retried, to avoid wasted API calls.
+        #
+        # The pass budget is deliberately NOT based on the number of pending folders: as folders
+        # succeed and drop out of the pending set, that count shrinks, which would starve any
+        # single folder that needs more retry attempts than there happen to be folders left (e.g.
+        # a 2-folder tree where the parent needs 3 attempts to converge would otherwise only get
+        # 2). A generous fixed floor combined with the folder count instead ensures every folder
+        # gets a reasonable number of attempts regardless of how many others are being processed,
+        # while still scaling up for very deep/wide hierarchies. A folder is only ever dropped
+        # from `pending_folder_ids` by succeeding or by failing with a non-transient error, so
+        # the fixed pass budget (not a "some folder must succeed each pass" heuristic) is what
+        # bounds the loop; a single folder needing several transient retries in a row is fine.
+        max_passes = max(len(pending_folder_ids), _MIN_FOLDER_DELETE_PASSES)
+        for pass_number in range(max_passes):
+            if not pending_folder_ids:
+                break
 
+            still_pending_folder_ids = []
+
+            for folder_id in pending_folder_ids:
                 # Delete the folder from the workspace
                 # https://learn.microsoft.com/en-us/rest/api/fabric/core/folders/delete-folder
                 try:
                     self.endpoint.invoke(method="DELETE", url=f"{self.base_api_url}/folders/{folder_id}")
                     logger.debug(f"Unpublished folder: {folder_id}")
                 except Exception as e:
-                    logger.warning(f"Failed to unpublish folder {folder_id}.  Raw exception: {e}")
+                    last_exception_by_folder_id[folder_id] = e
+                    if _is_folder_not_empty_error(e):
+                        # Defer to the next pass instead of giving up immediately, in case the
+                        # failure is due to a child folder deletion not yet being reflected
+                        # server-side.
+                        still_pending_folder_ids.append(folder_id)
+                    else:
+                        # Not the eventual-consistency race this loop is designed for; treat as
+                        # permanent so it isn't retried on every subsequent pass.
+                        logger.warning(f"Failed to unpublish folder {folder_id}.  Raw exception: {e}")
+
+            pending_folder_ids = still_pending_folder_ids
+
+            # Give the backend a brief moment to propagate the deletions from this pass before
+            # retrying folders still pending. Overridable so unit tests can run instantly.
+            if pending_folder_ids and pass_number < max_passes - 1:
+                time.sleep(float(os.environ.get(constants.EnvVar.RETRY_DELAY_OVERRIDE_SECONDS.value, 1)))
+
+        for folder_id in pending_folder_ids:
+            logger.warning(
+                f"Failed to unpublish folder {folder_id}.  Raw exception: {last_exception_by_folder_id[folder_id]}"
+            )
 
         logger.info(f"{constants.INDENT}Unpublished")

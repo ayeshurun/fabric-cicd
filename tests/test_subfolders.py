@@ -668,3 +668,80 @@ def test_refresh_repository_folders_platform_at_root(tmp_path, patched_fabric_wo
     workspace._refresh_repository_folders()
 
     assert workspace.repository_folders == {}
+
+
+def test_unpublish_folders_retries_parent_after_child_deleted(tmp_path, patched_fabric_workspace, valid_workspace_id):
+    """Regression test for issue #1115: nested empty folders are fully unpublished in one call.
+
+    Simulates the Fabric backend rejecting a parent folder's DELETE with a "folder was not
+    empty" style error on the first attempt (eventual-consistency lag right after its child was
+    deleted), then succeeding on a retry within the same _unpublish_folders() call. Both the
+    child and the parent must end up deleted, and only a single call should be needed.
+    """
+    workspace = patched_fabric_workspace(
+        workspace_id=valid_workspace_id,
+        repository_directory=str(tmp_path),
+        item_type_in_scope=["Notebook"],
+    )
+
+    # Fully empty, two-level nested folder structure deployed in the workspace; nothing left in
+    # the repository, so both folders are orphaned and should be removed.
+    workspace.repository_folders = {}
+    workspace.deployed_folders = {
+        "/Parent": "parent-folder-id",
+        "/Parent/Child": "child-folder-id",
+    }
+    workspace.deployed_items = {}
+
+    delete_calls = []
+    parent_attempts = 0
+
+    def fake_invoke(method, url, **_kwargs):
+        nonlocal parent_attempts
+        delete_calls.append(url)
+        if method == "DELETE" and url.endswith("/folders/parent-folder-id"):
+            parent_attempts += 1
+            if parent_attempts == 1:
+                error_message = (
+                    "Unhandled error occurred calling DELETE ... Message: The requested folder was not empty."
+                )
+                raise Exception(error_message)
+        return {"body": {}, "header": {}}
+
+    workspace.endpoint.invoke.side_effect = fake_invoke
+
+    workspace._unpublish_folders()
+
+    child_deletes = [url for url in delete_calls if url.endswith("child-folder-id")]
+    parent_deletes = [url for url in delete_calls if url.endswith("parent-folder-id")]
+
+    # Child deleted once; parent's first attempt failed but succeeded on retry.
+    assert len(child_deletes) == 1
+    assert len(parent_deletes) == 2
+
+    # Child must be deleted before the parent's successful attempt.
+    assert delete_calls.index(child_deletes[0]) < delete_calls.index(parent_deletes[-1])
+
+
+def test_unpublish_folders_stops_retrying_on_persistent_failure(tmp_path, patched_fabric_workspace, valid_workspace_id):
+    """A folder that never succeeds is retried a bounded number of times, then warned about."""
+    workspace = patched_fabric_workspace(
+        workspace_id=valid_workspace_id,
+        repository_directory=str(tmp_path),
+        item_type_in_scope=["Notebook"],
+    )
+
+    workspace.repository_folders = {}
+    workspace.deployed_folders = {"/Broken": "broken-folder-id"}
+    workspace.deployed_items = {}
+
+    def always_fail(*_args, **_kwargs):
+        error_message = "Unhandled error occurred calling DELETE ... Message: Access denied."
+        raise Exception(error_message)
+
+    workspace.endpoint.invoke.side_effect = always_fail
+
+    # Should not raise or hang; the permanent failure is logged as a warning.
+    workspace._unpublish_folders()
+
+    assert workspace.endpoint.invoke.call_count == 1

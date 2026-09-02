@@ -1210,18 +1210,45 @@ class FabricWorkspace:
 
         logger.info("Unpublishing Workspace Folders")
 
-        # Pop all folders
+        # Folders to remove, deepest paths first so children are always deleted before their parents
+        pending_folder_ids = [folder_id for folder_id in sorted_folder_ids if folder_id not in unorphaned_folders]
+        last_exception_by_folder_id = {}
 
-        for folder_id in sorted_folder_ids:
-            if folder_id not in unorphaned_folders:
-                # Folder deployed, but not in repository
+        # Delete folders in passes. A parent folder can only be deleted once the backend recognizes
+        # it as empty, which may lag behind the deletion of its last child folder. Retrying in
+        # subsequent passes (bounded by the number of folders to delete) absorbs that eventual
+        # consistency delay without turning genuine, non-transient failures into an infinite loop.
+        max_passes = len(pending_folder_ids)
+        for _ in range(max_passes):
+            if not pending_folder_ids:
+                break
 
+            still_pending_folder_ids = []
+            deleted_any = False
+
+            for folder_id in pending_folder_ids:
                 # Delete the folder from the workspace
                 # https://learn.microsoft.com/en-us/rest/api/fabric/core/folders/delete-folder
                 try:
                     self.endpoint.invoke(method="DELETE", url=f"{self.base_api_url}/folders/{folder_id}")
                     logger.debug(f"Unpublished folder: {folder_id}")
+                    deleted_any = True
                 except Exception as e:
-                    logger.warning(f"Failed to unpublish folder {folder_id}.  Raw exception: {e}")
+                    # Defer to the next pass instead of giving up immediately, in case the failure
+                    # is due to a child folder deletion not yet being reflected server-side.
+                    still_pending_folder_ids.append(folder_id)
+                    last_exception_by_folder_id[folder_id] = e
+
+            pending_folder_ids = still_pending_folder_ids
+
+            # No folder was deleted this pass, so retrying further passes would not help;
+            # any remaining failures are treated as genuine and logged below.
+            if not deleted_any:
+                break
+
+        for folder_id in pending_folder_ids:
+            logger.warning(
+                f"Failed to unpublish folder {folder_id}.  Raw exception: {last_exception_by_folder_id[folder_id]}"
+            )
 
         logger.info(f"{constants.INDENT}Unpublished")

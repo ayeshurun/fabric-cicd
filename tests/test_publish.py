@@ -191,6 +191,60 @@ def test_publish_map_item(mock_endpoint, temp_workspace_dir):
         mock_map_instance.publish_all.assert_called_once()
 
 
+def test_publish_org_app_item(mock_endpoint, temp_workspace_dir):
+    """Test that publish_all_items publishes OrgApp items when present in repository."""
+    create_test_item(temp_workspace_dir, None, "TestOrgApp", "OrgApp", "test-org-app-id")
+
+    with (
+        patch("fabric_cicd.fabric_workspace.FabricEndpoint", return_value=mock_endpoint),
+        patch.object(FabricWorkspace, "_refresh_deployed_items", new=lambda self: setattr(self, "deployed_items", {})),
+        patch.object(
+            FabricWorkspace, "_refresh_deployed_folders", new=lambda self: setattr(self, "deployed_folders", {})
+        ),
+        patch("fabric_cicd._items._orgapp.OrgAppPublisher") as mock_org_app_cls,
+    ):
+        mock_org_app_instance = mock_org_app_cls.return_value
+
+        workspace = FabricWorkspace(
+            workspace_id="12345678-1234-5678-abcd-1234567890ab",
+            repository_directory=str(temp_workspace_dir),
+            token_credential=DummyTokenCredential(),
+        )
+
+        publish.publish_all_items(workspace)
+
+        assert "OrgApp" in workspace.repository_items
+        mock_org_app_cls.assert_called_once_with(workspace)
+        mock_org_app_instance.publish_all.assert_called_once()
+
+
+def test_publish_org_app_audience_item(mock_endpoint, temp_workspace_dir):
+    """Test that publish_all_items publishes OrgAppAudience items when present in repository."""
+    create_test_item(temp_workspace_dir, None, "TestOrgAppAudience", "OrgAppAudience", "test-org-app-audience-id")
+
+    with (
+        patch("fabric_cicd.fabric_workspace.FabricEndpoint", return_value=mock_endpoint),
+        patch.object(FabricWorkspace, "_refresh_deployed_items", new=lambda self: setattr(self, "deployed_items", {})),
+        patch.object(
+            FabricWorkspace, "_refresh_deployed_folders", new=lambda self: setattr(self, "deployed_folders", {})
+        ),
+        patch("fabric_cicd._items._orgappaudience.OrgAppAudiencePublisher") as mock_org_app_audience_cls,
+    ):
+        mock_org_app_audience_instance = mock_org_app_audience_cls.return_value
+
+        workspace = FabricWorkspace(
+            workspace_id="12345678-1234-5678-abcd-1234567890ab",
+            repository_directory=str(temp_workspace_dir),
+            token_credential=DummyTokenCredential(),
+        )
+
+        publish.publish_all_items(workspace)
+
+        assert "OrgAppAudience" in workspace.repository_items
+        mock_org_app_audience_cls.assert_called_once_with(workspace)
+        mock_org_app_audience_instance.publish_all.assert_called_once()
+
+
 def test_publish_data_build_tool_job_item(mock_endpoint, temp_workspace_dir):
     """Test that publish_all_items publishes DataBuildToolJob items when present in repository."""
     create_test_item(temp_workspace_dir, None, "TestDbtJob", "DataBuildToolJob", "test-dbt-job-id")

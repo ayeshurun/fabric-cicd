@@ -23,6 +23,7 @@ append_feature_flag("<specific_flag>")
 | `continue_on_shortcut_failure`            | Allow deployment to continue even when shortcuts fail to publish                               |              |
 | `disable_workspace_folder_publish`        | Disable deploying workspace sub folders                                                        |              |
 | `enable_environment_variable_replacement` | Enable the use of pipeline variables for parameterization                                      |              |
+| `enable_semantic_model_purge`             | Allow Fabric to purge data when updating Semantic Model definitions                             |              |
 
 <span class="md-h3-nonanchor">Unpublish behavior</span>
 
@@ -61,6 +62,17 @@ append_feature_flag("enable_warehouse_unpublish")
 append_feature_flag("enable_environment_variable_replacement")
 append_feature_flag("enable_response_collection")
 ```
+
+### Allowing Semantic Model data purge
+
+When a Semantic Model definition update would discard existing data, Fabric rejects the update by default. To explicitly allow the update, enable `enable_semantic_model_purge`:
+
+```python
+from fabric_cicd import append_feature_flag
+append_feature_flag("enable_semantic_model_purge")
+```
+
+This option is disabled by default. When enabled, Fabric may purge data that cannot be retained under the updated definition. Refresh the Semantic Model after deployment; refreshing remains the caller's responsibility. When using bulk publish, updated Semantic Models must have unique, non-default logical IDs so the API can target the per-item option. If they do not, disable `enable_bulk_publish` for that deployment.
 
 <span class="md-h3-nonanchor">Listing supported flags</span>
 

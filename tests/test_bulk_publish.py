@@ -18,6 +18,7 @@ from fixtures.credentials import DummyTokenCredential
 import fabric_cicd.publish as publish
 from fabric_cicd import constants
 from fabric_cicd._common._exceptions import FailedPublishedItemStatusError, InputError
+from fabric_cicd._common._item import Item
 from fabric_cicd._items._base_publisher import ItemPublisher
 from fabric_cicd._items._bulk_publish_dependencies import (
     _get_referencing_item_keys,
@@ -417,6 +418,113 @@ class TestBulkPublishEndToEnd:
             publish.publish_all_items(workspace)
 
             assert len(bodies) == 0
+
+    def test_bulk_publish_adds_purge_option_for_existing_semantic_model(
+        self, mock_endpoint, temp_workspace_dir, monkeypatch
+    ):
+        """Bulk updates target opted-in SemanticModels by their unique logical ID."""
+        monkeypatch.setattr(
+            constants,
+            "FEATURE_FLAG",
+            {
+                FeatureFlag.ENABLE_EXPERIMENTAL_FEATURES.value,
+                FeatureFlag.ENABLE_BULK_PUBLISH.value,
+                FeatureFlag.ENABLE_SEMANTIC_MODEL_PURGE.value,
+            },
+        )
+        bodies = capture_bulk_bodies(mock_endpoint)
+
+        with patched_workspace(mock_endpoint, temp_workspace_dir, item_type_in_scope=["SemanticModel"]) as workspace:
+            item = Item(
+                type=ItemType.SEMANTIC_MODEL.value,
+                name="TestModel",
+                description="",
+                guid="existing-semantic-model-id",
+                logical_id="sm-id-001",
+            )
+            workspace._publish_items([("TestModel", item, SimpleNamespace(item_type=ItemType.SEMANTIC_MODEL.value))])
+
+        assert bodies[0]["options"]["itemOptionsByLogicalId"] == [
+            {"logicalId": "sm-id-001", "options": {"allowPurgeData": True}}
+        ]
+
+    def test_bulk_publish_rejects_purge_without_unique_semantic_model_logical_id(
+        self, mock_endpoint, temp_workspace_dir, monkeypatch
+    ):
+        """Bulk publish fails clearly rather than silently omitting a requested purge option."""
+        monkeypatch.setattr(
+            constants,
+            "FEATURE_FLAG",
+            {
+                FeatureFlag.ENABLE_EXPERIMENTAL_FEATURES.value,
+                FeatureFlag.ENABLE_BULK_PUBLISH.value,
+                FeatureFlag.ENABLE_SEMANTIC_MODEL_PURGE.value,
+            },
+        )
+        bodies = capture_bulk_bodies(mock_endpoint)
+
+        with patched_workspace(mock_endpoint, temp_workspace_dir, item_type_in_scope=["SemanticModel"]) as workspace:
+            item = Item(
+                type=ItemType.SEMANTIC_MODEL.value,
+                name="TestModel",
+                description="",
+                guid="existing-semantic-model-id",
+                logical_id=constants.DEFAULT_GUID,
+            )
+            with pytest.raises(InputError, match="does not have a unique logical ID"):
+                workspace._publish_items([
+                    ("TestModel", item, SimpleNamespace(item_type=ItemType.SEMANTIC_MODEL.value))
+                ])
+
+        assert bodies == []
+
+    def test_bulk_publish_does_not_add_purge_option_for_new_semantic_model(
+        self, mock_endpoint, temp_workspace_dir, monkeypatch
+    ):
+        """Bulk creates do not receive update-only semantic model purge options."""
+        monkeypatch.setattr(
+            constants,
+            "FEATURE_FLAG",
+            {
+                FeatureFlag.ENABLE_EXPERIMENTAL_FEATURES.value,
+                FeatureFlag.ENABLE_BULK_PUBLISH.value,
+                FeatureFlag.ENABLE_SEMANTIC_MODEL_PURGE.value,
+            },
+        )
+        bodies = capture_bulk_bodies(mock_endpoint)
+
+        with patched_workspace(mock_endpoint, temp_workspace_dir, item_type_in_scope=["SemanticModel"]) as workspace:
+            item = Item(
+                type=ItemType.SEMANTIC_MODEL.value,
+                name="TestModel",
+                description="",
+                guid="",
+                logical_id="sm-id-001",
+            )
+            workspace._publish_items([("TestModel", item, SimpleNamespace(item_type=ItemType.SEMANTIC_MODEL.value))])
+
+        assert "itemOptionsByLogicalId" not in bodies[0]["options"]
+
+    def test_bulk_publish_does_not_allow_purge_by_default(self, mock_endpoint, temp_workspace_dir, monkeypatch):
+        """Bulk updates retain the existing request shape unless purge is explicitly enabled."""
+        monkeypatch.setattr(
+            constants,
+            "FEATURE_FLAG",
+            {FeatureFlag.ENABLE_EXPERIMENTAL_FEATURES.value, FeatureFlag.ENABLE_BULK_PUBLISH.value},
+        )
+        bodies = capture_bulk_bodies(mock_endpoint)
+
+        with patched_workspace(mock_endpoint, temp_workspace_dir, item_type_in_scope=["SemanticModel"]) as workspace:
+            item = Item(
+                type=ItemType.SEMANTIC_MODEL.value,
+                name="TestModel",
+                description="",
+                guid="existing-semantic-model-id",
+                logical_id="sm-id-001",
+            )
+            workspace._publish_items([("TestModel", item, SimpleNamespace(item_type=ItemType.SEMANTIC_MODEL.value))])
+
+        assert "itemOptionsByLogicalId" not in bodies[0]["options"]
 
 
 # =============================================================================

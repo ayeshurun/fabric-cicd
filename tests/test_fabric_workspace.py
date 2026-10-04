@@ -2287,3 +2287,60 @@ def test_api_root_url_snapshot_is_not_retargeted_by_second_configure_call(
     # workspace_a should still use fqdn_a, not fqdn_b
     assert workspace_a._api_root_url == expected_fqdn_a
     assert workspace_a.base_api_url.startswith(expected_fqdn_a)
+
+
+@pytest.mark.parametrize(
+    ("item_type", "enable_purge", "expected_options"),
+    [
+        ("SemanticModel", False, None),
+        ("SemanticModel", True, {"allowPurgeData": True}),
+        ("Notebook", True, None),
+    ],
+)
+def test_existing_item_definition_update_options(
+    temp_workspace_dir,
+    patched_fabric_workspace,
+    valid_workspace_id,
+    monkeypatch,
+    item_type,
+    enable_purge,
+    expected_options,
+):
+    """Only opted-in updates to existing SemanticModels allow data purge."""
+    flags = {constants.FeatureFlag.ENABLE_SEMANTIC_MODEL_PURGE.value} if enable_purge else set()
+    monkeypatch.setattr(constants, "FEATURE_FLAG", flags)
+
+    workspace = patched_fabric_workspace(valid_workspace_id, str(temp_workspace_dir))
+    item_name = "TestItem"
+    item = Item(type=item_type, name=item_name, description="", guid="existing-item-id")
+    workspace.repository_items = {item_type: {item_name: item}}
+    workspace.deployed_items = {}
+
+    workspace._publish_item(item_name=item_name, item_type=item_type)
+
+    update_call = next(
+        call for call in workspace.endpoint.invoke.call_args_list if "updateDefinition" in call.kwargs["url"]
+    )
+    request_body = update_call.kwargs["body"]
+    if expected_options:
+        assert request_body["options"] == expected_options
+    else:
+        assert "options" not in request_body
+
+
+def test_new_semantic_model_creation_does_not_allow_data_purge(
+    temp_workspace_dir, patched_fabric_workspace, valid_workspace_id, monkeypatch
+):
+    """The purge option is only sent when updating an existing SemanticModel."""
+    monkeypatch.setattr(constants, "FEATURE_FLAG", {constants.FeatureFlag.ENABLE_SEMANTIC_MODEL_PURGE.value})
+    workspace = patched_fabric_workspace(valid_workspace_id, str(temp_workspace_dir))
+    item = Item(type="SemanticModel", name="TestModel", description="", guid="")
+    workspace.repository_items = {"SemanticModel": {"TestModel": item}}
+    workspace.deployed_items = {}
+
+    workspace._publish_item(item_name="TestModel", item_type="SemanticModel")
+
+    create_call = next(
+        call for call in workspace.endpoint.invoke.call_args_list if call.kwargs["url"].endswith("/items")
+    )
+    assert "options" not in create_call.kwargs["body"]

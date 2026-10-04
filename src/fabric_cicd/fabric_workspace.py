@@ -814,17 +814,17 @@ class FabricWorkspace:
         elif is_deployed and not shell_only_publish:
             # Update the item's definition if full publish is required
             # https://learn.microsoft.com/en-us/rest/api/fabric/core/items/update-item-definition
-            update_body = definition_body
+            update_definition_body = definition_body
             if (
                 item_type == ItemType.SEMANTIC_MODEL.value
                 and FeatureFlag.ENABLE_SEMANTIC_MODEL_PURGE.value in constants.FEATURE_FLAG
             ):
-                update_body = {**definition_body, "options": {"allowPurgeData": True}}
+                update_definition_body = {**definition_body, "options": {"allowPurgeData": True}}
 
             update_response = self.endpoint.invoke(
                 method="POST",
                 url=f"{self.base_api_url}/items/{item_guid}/updateDefinition?updateMetadata=True",
-                body=update_body,
+                body=update_definition_body,
             )
             api_response = update_response
         elif is_deployed and shell_only_publish:

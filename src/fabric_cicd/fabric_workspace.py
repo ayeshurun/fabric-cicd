@@ -814,10 +814,17 @@ class FabricWorkspace:
         elif is_deployed and not shell_only_publish:
             # Update the item's definition if full publish is required
             # https://learn.microsoft.com/en-us/rest/api/fabric/core/items/update-item-definition
+            update_definition_body = definition_body
+            if (
+                item_type == ItemType.SEMANTIC_MODEL.value
+                and FeatureFlag.ENABLE_SEMANTIC_MODEL_PURGE.value in constants.FEATURE_FLAG
+            ):
+                update_definition_body = {**definition_body, "options": {"allowPurgeData": True}}
+
             update_response = self.endpoint.invoke(
                 method="POST",
                 url=f"{self.base_api_url}/items/{item_guid}/updateDefinition?updateMetadata=True",
-                body=definition_body,
+                body=update_definition_body,
             )
             api_response = update_response
         elif is_deployed and shell_only_publish:
@@ -880,11 +887,30 @@ class FabricWorkspace:
         """
         # Prepare the definition parts for all items to be published in bulk
         definition_parts = []
+        item_options_by_logical_id = []
         for _item_name, item, publisher in items_with_context:
+            if (
+                item.type == ItemType.SEMANTIC_MODEL.value
+                and item.guid
+                and FeatureFlag.ENABLE_SEMANTIC_MODEL_PURGE.value in constants.FEATURE_FLAG
+            ):
+                if not item.logical_id or item.logical_id == constants.DEFAULT_GUID:
+                    msg = (
+                        f"Cannot enable semantic model data purge for '{item.name}' in bulk publish because it "
+                        "does not have a unique logical ID. Disable 'enable_bulk_publish' to publish this "
+                        "semantic model through the standard update API."
+                    )
+                    raise InputError(msg, logger)
+                item_options_by_logical_id.append({"logicalId": item.logical_id, "options": {"allowPurgeData": True}})
+
             item_parts = self._prepare_bulk_item_parts(item, publisher)
             definition_parts.extend(item_parts)
 
         logger.info(f"Publishing {len(items_with_context)} item(s) in bulk")
+
+        request_options = {"allowPairingByName": True}
+        if item_options_by_logical_id:
+            request_options["itemOptionsByLogicalId"] = item_options_by_logical_id
 
         # https://learn.microsoft.com/en-us/rest/api/fabric/core/items/bulk-import-item-definitions
         response = self.endpoint.invoke(
@@ -892,7 +918,7 @@ class FabricWorkspace:
             url=f"{self.base_api_url}/items/bulkImportDefinitions",
             body={
                 "definitionParts": definition_parts,
-                "options": {"allowPairingByName": True},
+                "options": request_options,
             },
             max_duration=1800,  # 30 minutes, as bulk operations can take longer time to complete
         )

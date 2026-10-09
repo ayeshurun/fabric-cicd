@@ -68,6 +68,8 @@ class ItemType(str, Enum):
     MOUNTED_DATA_FACTORY = "MountedDataFactory"
     NOTEBOOK = "Notebook"
     ONTOLOGY = "Ontology"
+    ORG_APP = "OrgApp"
+    ORG_APP_AUDIENCE = "OrgAppAudience"
     PAGINATED_REPORT = "PaginatedReport"
     REFLEX = "Reflex"
     REPORT = "Report"
@@ -113,6 +115,8 @@ SERIAL_ITEM_PUBLISH_ORDER: dict[int, ItemType] = {
     29: ItemType.ML_EXPERIMENT,
     30: ItemType.MAP,
     31: ItemType.GRAPH_MODEL,
+    30: ItemType.ORG_APP,
+    31: ItemType.ORG_APP_AUDIENCE,
 }
 
 
@@ -243,6 +247,7 @@ EXCLUDE_PATH_REGEX_MAPPING = {
     ItemType.REPORT.value: r".*\.pbi[/\\].*",
     ItemType.SEMANTIC_MODEL.value: r".*\.pbi[/\\].*",
     ItemType.EVENTHOUSE.value: r".*\.children[/\\].*",
+    ItemType.ORG_APP.value: r".*\.children[/\\].*",
 }
 
 # API Format Mapping for item types that require specific API formats
@@ -263,6 +268,7 @@ DATAFLOW_SOURCE_REGEX = (
 )
 INVALID_FOLDER_CHAR_REGEX = r'[~"#.%&*:<>?/\\{|}]'
 KQL_DATABASE_FOLDER_PATH_REGEX = r"(?i)^(.*)/[^/]+\.Eventhouse/\.children(?:/.*)?$"
+ORG_APP_AUDIENCE_FOLDER_PATH_REGEX = r"(?i)^(.*)/[^/]+\.OrgApp/\.children(?:/.*)?$"
 DYNAMIC_VARIABLES_REGEX = r"^\$(workspace|items)\."
 
 # Well known file names
@@ -270,6 +276,14 @@ DATA_PIPELINE_CONTENT_FILE_JSON = "pipeline-content.json"
 
 # Item Type to File Mapping (to check for item dependencies)
 ITEM_TYPE_TO_FILE = {ItemType.DATA_PIPELINE.value: DATA_PIPELINE_CONTENT_FILE_JSON}
+
+# Child item types stored under a parent's `.children` folder. Maps the child item type to
+# the regex that captures the parent folder path preceding the parent's container folder,
+# so the child is placed in the same workspace folder as its parent container.
+CHILD_ITEM_FOLDER_PATH_REGEX_MAPPING = {
+    ItemType.KQL_DATABASE.value: KQL_DATABASE_FOLDER_PATH_REGEX,
+    ItemType.ORG_APP_AUDIENCE.value: ORG_APP_AUDIENCE_FOLDER_PATH_REGEX,
+}
 
 # Property path to get SQL Endpoint or Eventhouse URI
 PROPERTY_PATH_ATTR_MAPPING = {
